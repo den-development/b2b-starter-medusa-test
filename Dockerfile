@@ -13,8 +13,12 @@ RUN corepack enable && corepack prepare yarn@4.4.0 --activate
 # TÜM REPO İÇERİĞİNİ KOPYALA
 COPY . .
 
-# Satır 25: BAĞIMLILIKLARI KUR (Tüm bağımlılıkları içerir, --production=false kaldırıldı)
-RUN yarn install --frozen-lockfile
+# HATA AYIKLAMA: Kök dizindeki dosyaları kontrol et (Opsiyonel, hata verirse kaldırılabilir)
+# RUN ls -al /app
+
+# Satır 25: BAĞIMLILIKLARI KUR (Tüm bağımlılıkları içerir. Yarn v4 için --immutable kullanın)
+# Monorepo'larda, kök dizinde paketi bulmak için package.json ve .yarnrc.yml şarttır.
+RUN yarn install --immutable
 
 # Backend klasörü içine geç
 WORKDIR /app/backend
@@ -32,10 +36,12 @@ WORKDIR /app
 # 1. KÖK BAĞIMLILIK DOSYALARINI BUILDER FAZINDAN KOPYALA
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/yarn.lock ./yarn.lock
+# Monorepo/Yarn v4 kullanıyorsanız bu dosya olmazsa olmazdır.
+COPY --from=builder /app/.yarnrc.yml ./.yarnrc.yml 
 
-# Satır 44: Sadece üretim bağımlılıklarını kur (--frozen-lockfile ekliyoruz)
-# Yarn v4'te sadece production bağımlılıklarını kurmak için `--production` kullanılır.
-RUN yarn install --production --frozen-lockfile
+# Satır 47: Sadece üretim bağımlılıklarını kur (Yarn v4 için --production)
+# Monorepo'da sadece üretim bağımlılıklarını kurmak için `--production` ve `--immutable` kullanın
+RUN yarn install --immutable --production 
 
 # 2. BUILD edilmiş kodu ve diğer gerekli dosyaları kopyala
 COPY --from=builder /app/backend/dist ./backend/dist
