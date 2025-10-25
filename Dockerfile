@@ -1,54 +1,55 @@
-# Faz 1: Builder
+# Faz 1: Builder (Gerekli bağımlılıkları yükleme ve projeyi build etme)
 FROM node:20-alpine AS builder
 
 # Gerekli sistem paketlerini kurun
 RUN apk update && apk add python3 make g++
 
-# KÖK WORKDIR'I MEDUSA PROJE KLASÖRÜ OLARAK AYARLAYIN
-# Bütün operasyonlar /app/backend içinde gerçekleşecek.
-WORKDIR /app/backend
+# Konteyner içinde uygulama dizinini oluştur ve içine geç
+WORKDIR /app
 
-# Corepack'i etkinleştirin
+# SADECE REPO'DAKI "backend" KLASÖRÜNÜN İÇERİĞİNİ /app DİZİNİNE KOPYALA
+# Bu, /app dizinini, repodaki /backend klasörünün içeriği (package.json, src, vb.) ile doldurur.
+# Eğer Medusa projeniz root'taki "backend" klasöründe ise, bu kesindir.
+COPY ./backend /app
+
+# Corepack'i etkinleştirin ve projede tanımlı Yarn v4 sürümünü kullanın
 RUN corepack enable && corepack prepare yarn@4.4.0 --activate
 
-# TÜM REPO İÇERİĞİNİ KOPYALA
-# Bu, /app/backend'in içine kopyalanacak. (Paket ve diğer dosyalar)
-COPY . /app/backend
-
-# package.json ve yarn.lock'ın /app/backend içinde olduğunu varsayarak
+# Bağımlılıkları kur (WORKDIR /app olduğu için package.json'ı bulacak)
 RUN yarn install --immutable
 
 # Medusa backend'i build et
+# Build komutları artık /app (backend projesinin kökü) içinde çalışacak
 RUN yarn build
 
 
-# Faz 2: Runner
+# Faz 2: Runner (Sadece production bağımlılıklarını ve build edilmiş kodu içerir)
 FROM node:20-alpine AS runner
 
-# KÖK WORKDIR'I YİNE MEDUSA PROJE KLASÖRÜ OLARAK AYARLAYIN
-WORKDIR /app/backend
+# Çalışma dizinini ana app klasörüne ayarlayın
+WORKDIR /app
 
-# 1. KÖK BAĞIMLILIK DOSYALARINI BUILDER FAZINDAN KOPYALA
-COPY --from=builder /app/backend/package.json ./package.json
-COPY --from=builder /app/backend/yarn.lock ./yarn.lock
-# .yarnrc.yml kopyalanması (Yarn v4 için kritik)
-COPY --from=builder /app/backend/.yarnrc.yml ./.yarnrc.yml || true
+# 1. Gerekli dosyaları ve build output'unu kopyala
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/yarn.lock ./yarn.lock
 
-# Sadece üretim bağımlılıklarını kur (WORKDIR zaten /app/backend)
+# Eğer .yarnrc.yml varsa, bunu da kopyala (Hata vermemesi için || true ekliyoruz)
+COPY --from=builder /app/.yarnrc.yml ./.yarnrc.yml || true
+
+# Sadece üretim bağımlılıklarını kur
 RUN yarn install --immutable --production
 
 # 2. BUILD edilmiş kodu ve diğer gerekli dosyaları kopyala
-COPY --from=builder /app/backend/dist ./dist
-
-# Diğer Gerekli Backend dosyalarını kopyala
-COPY --from=builder /app/backend/src ./src
-COPY --from=builder /app/backend/medusa-config.js ./medusa-config.js
-COPY --from=builder /app/backend/.env.template ./.env.template
-COPY --from=builder /app/backend/data ./data
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/medusa-config.js ./medusa-config.js
+COPY --from=builder /app/.env.template ./.env.template
+COPY --from=builder /app/data ./data
 
 # Medusa'nın varsayılan olarak dinlediği port
 ENV PORT 9000
 EXPOSE 9000
 
 # Başlangıç komutu
+# Runner WORKDIR /app olduğu için, komut bu dizinden çalışacak.
 CMD ["sh", "-c", "node_modules/.bin/medusa db:migrate && node_modules/.bin/medusa start"]
